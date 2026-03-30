@@ -5,10 +5,12 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
+
+from auth_client import require_auth
 
 import db
 from scheduler import (
@@ -28,6 +30,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("cronpilot")
 
+AUTH_SERVICE_URL = os.environ.get("AUTH_SERVICE_URL", "http://localhost:8499")
 PORT = int(os.environ.get("PORT", "8440"))
 
 
@@ -439,7 +442,7 @@ async def dashboard():
 # --- Jobs CRUD ---
 
 @app.post("/jobs", status_code=201)
-async def create_job_endpoint(data: JobCreate):
+async def create_job_endpoint(data: JobCreate, auth: dict = Depends(require_auth)):
     if not data.url and not data.command:
         raise HTTPException(400, "Either 'url' or 'command' must be provided")
 
@@ -464,7 +467,7 @@ async def create_job_endpoint(data: JobCreate):
 
 
 @app.get("/jobs")
-async def list_jobs_endpoint():
+async def list_jobs_endpoint(auth: dict = Depends(require_auth)):
     jobs = db.list_jobs()
     next_runs = get_next_run_times()
     for job in jobs:
@@ -479,7 +482,7 @@ async def list_jobs_endpoint():
 
 
 @app.get("/jobs/{job_id}")
-async def get_job_endpoint(job_id: str):
+async def get_job_endpoint(job_id: str, auth: dict = Depends(require_auth)):
     job = db.get_job(job_id)
     if job is None:
         raise HTTPException(404, "Job not found")
@@ -507,7 +510,7 @@ async def get_job_endpoint(job_id: str):
 
 
 @app.put("/jobs/{job_id}")
-async def update_job_endpoint(job_id: str, data: JobUpdate):
+async def update_job_endpoint(job_id: str, data: JobUpdate, auth: dict = Depends(require_auth)):
     if data.schedule and not validate_cron(data.schedule):
         raise HTTPException(400, f"Invalid cron expression: {data.schedule}")
 
@@ -521,7 +524,7 @@ async def update_job_endpoint(job_id: str, data: JobUpdate):
 
 
 @app.delete("/jobs/{job_id}")
-async def delete_job_endpoint(job_id: str):
+async def delete_job_endpoint(job_id: str, auth: dict = Depends(require_auth)):
     unschedule_job(job_id)
     deleted = db.delete_job(job_id)
     if not deleted:
@@ -532,7 +535,7 @@ async def delete_job_endpoint(job_id: str):
 # --- Job Actions ---
 
 @app.post("/jobs/{job_id}/trigger")
-async def trigger_job_endpoint(job_id: str):
+async def trigger_job_endpoint(job_id: str, auth: dict = Depends(require_auth)):
     job = db.get_job(job_id)
     if job is None:
         raise HTTPException(404, "Job not found")
@@ -542,7 +545,7 @@ async def trigger_job_endpoint(job_id: str):
 
 
 @app.post("/jobs/{job_id}/pause")
-async def pause_job_endpoint(job_id: str):
+async def pause_job_endpoint(job_id: str, auth: dict = Depends(require_auth)):
     job = db.set_job_paused(job_id, True)
     if job is None:
         raise HTTPException(404, "Job not found")
@@ -551,7 +554,7 @@ async def pause_job_endpoint(job_id: str):
 
 
 @app.post("/jobs/{job_id}/resume")
-async def resume_job_endpoint(job_id: str):
+async def resume_job_endpoint(job_id: str, auth: dict = Depends(require_auth)):
     job = db.set_job_paused(job_id, False)
     if job is None:
         raise HTTPException(404, "Job not found")
@@ -562,7 +565,7 @@ async def resume_job_endpoint(job_id: str):
 # --- Runs ---
 
 @app.get("/jobs/{job_id}/runs")
-async def list_runs_endpoint(job_id: str, limit: int = Query(default=50, ge=1, le=500)):
+async def list_runs_endpoint(job_id: str, limit: int = Query(default=50, ge=1, le=500), auth: dict = Depends(require_auth)):
     job = db.get_job(job_id)
     if job is None:
         raise HTTPException(404, "Job not found")
@@ -572,7 +575,7 @@ async def list_runs_endpoint(job_id: str, limit: int = Query(default=50, ge=1, l
 
 
 @app.get("/jobs/{job_id}/runs/{run_id}")
-async def get_run_endpoint(job_id: str, run_id: str):
+async def get_run_endpoint(job_id: str, run_id: str, auth: dict = Depends(require_auth)):
     run = db.get_run(run_id)
     if run is None or run["job_id"] != job_id:
         raise HTTPException(404, "Run not found")
